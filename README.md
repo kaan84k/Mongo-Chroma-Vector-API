@@ -93,6 +93,16 @@ GEMINI_EMBED_MODEL=text-embedding-004
 
 For multiple environments, set `APP_ENV` (e.g., `production`, `staging`) and optionally create `.env.production` / `.env.staging` to override the base `.env`. Startup will fail fast if required environment variables are missing to avoid falling back to unsafe defaults.
 
+### Worker configuration
+
+- `API_BASE` (default `http://localhost:8000`)
+- `POLL_INTERVAL_SEC` (default `5`)
+- `WORKER_MAX_RETRIES` / `WORKER_BACKOFF_BASE_SEC` (exponential backoff for /ingest calls)
+- `WORKER_CHECKPOINT_FILE` (persists last processed Mongo `_id` so restarts resume)
+- `USE_CHANGE_STREAM` (set `true` to use Mongo change streams; requires a replica set)
+
+When `USE_CHANGE_STREAM=true`, the worker listens for `insert/replace/update` events via Mongo change streams instead of polling. For deletes, call the API’s `/delete` endpoint separately.
+
 ## 🔒 Security (auth, CORS, rate limits, HTTPS)
 
 - **Auth token**: set `API_TOKEN` (Bearer) and include `Authorization: Bearer <token>` on all API calls.

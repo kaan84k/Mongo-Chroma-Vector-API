@@ -89,3 +89,4 @@ venv.bak/
 *.pid
 *.seed
 *.pid.lock
+worker_checkpoint.txt

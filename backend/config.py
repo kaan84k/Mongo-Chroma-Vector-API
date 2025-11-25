@@ -33,6 +33,16 @@ ALLOWED_CORS_ORIGINS = [
     if origin.strip()
 ]
 RATE_LIMIT_PER_MIN = int(os.getenv("RATE_LIMIT_PER_MIN", "120"))
+API_BASE = os.getenv("API_BASE", "http://localhost:8000")
+
+# Worker settings
+POLL_INTERVAL_SEC = int(os.getenv("POLL_INTERVAL_SEC", "5"))
+WORKER_MAX_RETRIES = int(os.getenv("WORKER_MAX_RETRIES", "3"))
+WORKER_BACKOFF_BASE_SEC = float(os.getenv("WORKER_BACKOFF_BASE_SEC", "1.0"))
+WORKER_CHECKPOINT_FILE = os.getenv(
+    "WORKER_CHECKPOINT_FILE", str(ROOT_DIR / "worker_checkpoint.txt")
+)
+USE_CHANGE_STREAM = os.getenv("USE_CHANGE_STREAM", "false").lower() == "true"
 
 # Mongo
 MONGO_URI = os.getenv("MONGO_URI")
