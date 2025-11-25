@@ -1,13 +1,56 @@
-from fastapi import FastAPI, HTTPException
+import time
+from collections import deque, defaultdict
+from typing import Deque, Dict, List
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 
 from .api_models import IngestPayload, SearchRequest, DeletePayload
 from .vector_store import upsert_document, query_documents, delete_document
+from .config import API_TOKEN, ALLOWED_CORS_ORIGINS, RATE_LIMIT_PER_MIN
 
 app = FastAPI(
     title="Mongo → Chroma Vector API",
     version="1.0.0",
     description="Core vector service for syncing MongoDB documents into ChromaDB.",
 )
+
+# CORS allowlist (empty list → no CORS)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Very small in-memory rate limiter per client IP
+RATE_WINDOW_SEC = 60
+request_log: Dict[str, Deque[float]] = defaultdict(deque)
+
+
+@app.middleware("http")
+async def auth_and_rate_limit(request: Request, call_next):
+    client_ip = request.client.host if request.client else "unknown"
+
+    # Rate limiting
+    now = time.time()
+    timestamps = request_log[client_ip]
+    while timestamps and now - timestamps[0] > RATE_WINDOW_SEC:
+        timestamps.popleft()
+    if len(timestamps) >= RATE_LIMIT_PER_MIN:
+        raise HTTPException(status_code=429, detail="Too many requests")
+    timestamps.append(now)
+
+    # Token auth (Bearer or raw token)
+    if API_TOKEN:
+        auth_header = request.headers.get("authorization", "")
+        token = auth_header.replace("Bearer ", "").strip() if auth_header else ""
+        if token != API_TOKEN:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+    response = await call_next(request)
+    return response
 
 
 def build_text_from_payload(p: IngestPayload) -> str:

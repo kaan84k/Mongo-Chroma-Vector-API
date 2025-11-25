@@ -5,7 +5,7 @@ import requests
 from pymongo import MongoClient
 from bson.objectid import ObjectId
 
-from backend.config import MONGO_URI, MONGO_DB, MONGO_COLLECTION
+from backend.config import MONGO_URI, MONGO_DB, MONGO_COLLECTION, API_TOKEN
 
 API_BASE = "http://localhost:8000"
 
@@ -38,7 +38,13 @@ def run_polling_worker():
             }
 
             try:
-                r = requests.post(f"{API_BASE}/ingest", json=payload, timeout=10)
+                headers = {}
+                if API_TOKEN:
+                    headers["Authorization"] = f"Bearer {API_TOKEN}"
+
+                r = requests.post(
+                    f"{API_BASE}/ingest", json=payload, timeout=10, headers=headers
+                )
                 r.raise_for_status()
                 print(
                     f"[{datetime.utcnow().isoformat()}] Synced Mongo _id={payload['mongo_id']} to Chroma"

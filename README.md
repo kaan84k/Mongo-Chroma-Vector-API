@@ -93,6 +93,30 @@ GEMINI_EMBED_MODEL=text-embedding-004
 
 For multiple environments, set `APP_ENV` (e.g., `production`, `staging`) and optionally create `.env.production` / `.env.staging` to override the base `.env`. Startup will fail fast if required environment variables are missing to avoid falling back to unsafe defaults.
 
+## 🔒 Security (auth, CORS, rate limits, HTTPS)
+
+- **Auth token**: set `API_TOKEN` (Bearer) and include `Authorization: Bearer <token>` on all API calls.
+- **CORS**: set `CORS_ALLOW_ORIGINS` as a comma-separated list (e.g., `https://yourapp.com,https://admin.yourapp.com`).
+- **Rate limit**: configure `RATE_LIMIT_PER_MIN` (default 120/min per client IP).
+- **HTTPS**: run FastAPI behind a reverse proxy (e.g., nginx/Traefik) that terminates TLS and forwards to Uvicorn. Example nginx snippet:
+
+```
+server {
+  listen 443 ssl;
+  server_name api.yourdomain.com;
+
+  ssl_certificate /etc/ssl/fullchain.pem;
+  ssl_certificate_key /etc/ssl/privkey.pem;
+
+  location / {
+    proxy_pass http://127.0.0.1:8000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+  }
+}
+```
+
 ---
 
 ## 🚀 Running the System

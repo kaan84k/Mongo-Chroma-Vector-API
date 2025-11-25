@@ -25,6 +25,15 @@ missing = [key for key in REQUIRED_VARS if not os.getenv(key)]
 if missing:
     raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
 
+# API security
+API_TOKEN = os.getenv("API_TOKEN")
+ALLOWED_CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("CORS_ALLOW_ORIGINS", "").split(",")
+    if origin.strip()
+]
+RATE_LIMIT_PER_MIN = int(os.getenv("RATE_LIMIT_PER_MIN", "120"))
+
 # Mongo
 MONGO_URI = os.getenv("MONGO_URI")
 MONGO_DB = os.getenv("MONGO_DB")
