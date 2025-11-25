@@ -115,6 +115,16 @@ For multiple environments, set `APP_ENV` (e.g., `production`, `staging`) and opt
 
 When `USE_CHANGE_STREAM=true`, the worker listens for `insert/replace/update` events via Mongo change streams instead of polling. For deletes, call the API’s `/delete` endpoint separately.
 
+### 🐳 Docker / Docker Compose
+
+Build and run API + worker + Mongo:
+
+```bash
+docker-compose up --build
+```
+
+Compose overrides `MONGO_URI`/`API_BASE` to use service names (`mongo`, `api`) and shares `chroma_store` via a named volume. Stop with `docker-compose down` (add `-v` to drop volumes).
+
 ## 🔒 Security (auth, CORS, rate limits, HTTPS)
 
 - **Auth token**: set `API_TOKEN` (Bearer) and include `Authorization: Bearer <token>` on all API calls.
@@ -238,6 +248,12 @@ curl -X POST http://localhost:8000/ask-test \
 ```
 
 This checks retrieval + Gemini reasoning.
+
+---
+
+## ✅ CI
+
+GitHub Actions runs on push/PR to `main` and performs dependency install plus a compile check (`python -m compileall backend worker`).
 
 ---
 
