@@ -49,7 +49,7 @@ mongo-chroma-vector-api/
 ### 1️⃣ Clone the Project
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/kaan84k/Mongo-Chroma-Vector-API.git
 cd mongo-chroma-vector-api
 ```
 
