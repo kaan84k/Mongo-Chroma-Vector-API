@@ -100,6 +100,7 @@ For multiple environments, set `APP_ENV` (e.g., `production`, `staging`) and opt
 - `WORKER_MAX_RETRIES` / `WORKER_BACKOFF_BASE_SEC` (exponential backoff for /ingest calls)
 - `WORKER_CHECKPOINT_FILE` (persists last processed Mongo `_id` so restarts resume)
 - `USE_CHANGE_STREAM` (set `true` to use Mongo change streams; requires a replica set)
+- `WORKER_METRICS_PORT` (default `9001`) for Prometheus `/metrics` served by the worker
 
 When `USE_CHANGE_STREAM=true`, the worker listens for `insert/replace/update` events via Mongo change streams instead of polling. For deletes, call the API’s `/delete` endpoint separately.
 

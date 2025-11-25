@@ -9,5 +9,7 @@ pymongo
 
 chromadb
 
+prometheus-client
+
 # Optional – ONLY for /ask-test
 google-genai

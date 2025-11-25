@@ -43,6 +43,7 @@ WORKER_CHECKPOINT_FILE = os.getenv(
     "WORKER_CHECKPOINT_FILE", str(ROOT_DIR / "worker_checkpoint.txt")
 )
 USE_CHANGE_STREAM = os.getenv("USE_CHANGE_STREAM", "false").lower() == "true"
+WORKER_METRICS_PORT = int(os.getenv("WORKER_METRICS_PORT", "9001"))
 
 # Mongo
 MONGO_URI = os.getenv("MONGO_URI")

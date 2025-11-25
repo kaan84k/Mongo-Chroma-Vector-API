@@ -1,3 +1,4 @@
+import json
 import random
 import time
 from datetime import datetime
@@ -5,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 import requests
+from prometheus_client import Counter, Gauge, start_http_server
 from pymongo import MongoClient
 from bson.objectid import ObjectId
 
@@ -19,7 +21,13 @@ from backend.config import (
     WORKER_CHECKPOINT_FILE,
     WORKER_MAX_RETRIES,
     USE_CHANGE_STREAM,
+    WORKER_METRICS_PORT,
 )
+
+# Metrics
+WORKER_PROCESSED = Counter("worker_processed_total", "Processed docs", ["status"])
+WORKER_RETRIES = Counter("worker_retries_total", "Retries attempted")
+WORKER_LAST_ID = Gauge("worker_last_mongo_id", "Last processed Mongo ObjectId (timestamp component)")
 
 
 def _headers():
@@ -41,12 +49,17 @@ def _post_with_retry(payload: dict) -> bool:
             r.raise_for_status()
             return True
         except Exception as e:
+            WORKER_RETRIES.inc()
             sleep_for = WORKER_BACKOFF_BASE_SEC * (2**attempt) * (1 + random.random())
-            print(
-                f"[WARN] /ingest attempt {attempt + 1}/{WORKER_MAX_RETRIES} failed: {e}; retrying in {sleep_for:.2f}s"
+            _log(
+                "ingest_retry",
+                attempt=attempt + 1,
+                max_attempts=WORKER_MAX_RETRIES,
+                error=str(e),
+                sleep_for=round(sleep_for, 2),
             )
             time.sleep(sleep_for)
-    print("[ERROR] Exhausted retries for payload", payload.get("mongo_id"))
+    _log("ingest_failed", mongo_id=payload.get("mongo_id"))
     return False
 
 
@@ -75,7 +88,14 @@ def _process_doc(doc) -> bool:
     }
     ok = _post_with_retry(payload)
     if ok:
-        print(f"[{datetime.utcnow().isoformat()}] Synced Mongo _id={payload['mongo_id']} to Chroma")
+        _log("synced", mongo_id=payload["mongo_id"])
+        WORKER_PROCESSED.labels(status="success").inc()
+        try:
+            WORKER_LAST_ID.set(doc["_id"].generation_time.timestamp())
+        except Exception:
+            pass
+    else:
+        WORKER_PROCESSED.labels(status="error").inc()
     return ok
 
 
@@ -85,10 +105,15 @@ def run_polling_worker():
     coll = db[MONGO_COLLECTION]
 
     last_seen_id = _load_checkpoint()
-    print(
-        f"Starting polling worker (every {POLL_INTERVAL_SEC}s)… "
-        f"(API_BASE={API_BASE}, checkpoint={last_seen_id})"
+    _log(
+        "worker_start_polling",
+        interval_sec=POLL_INTERVAL_SEC,
+        api_base=API_BASE,
+        checkpoint=str(last_seen_id),
+        metrics_port=WORKER_METRICS_PORT,
     )
+
+    start_http_server(WORKER_METRICS_PORT)
 
     while True:
         query = {"_id": {"$gt": last_seen_id}} if last_seen_id else {}
@@ -106,7 +131,9 @@ def run_change_stream_worker():
     client = MongoClient(MONGO_URI)
     db = client[MONGO_DB]
     coll = db[MONGO_COLLECTION]
-    print(f"Starting change stream worker… (API_BASE={API_BASE})")
+    _log("worker_start_change_stream", api_base=API_BASE, metrics_port=WORKER_METRICS_PORT)
+
+    start_http_server(WORKER_METRICS_PORT)
 
     with coll.watch(full_document="updateLookup") as stream:
         for change in stream:
@@ -116,6 +143,11 @@ def run_change_stream_worker():
             if not doc:
                 continue
             _process_doc(doc)
+
+
+def _log(message: str, **kwargs):
+    record = {"msg": message, "ts": datetime.utcnow().isoformat(), **kwargs}
+    print(json.dumps(record))
 
 
 if __name__ == "__main__":
