@@ -1,38 +1,7 @@
-import json
-import time
-import uuid
-from pathlib import Path
-from collections import deque, defaultdict
-from typing import Any, Deque, Dict, List, Optional
+from fastapi import FastAPI, HTTPException
 
-from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse
-from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
-from pymongo import MongoClient
-
-from .api_models import (
-    IngestPayload,
-    BatchIngestPayload,
-    SearchRequest,
-    DeletePayload,
-)
-from .vector_store import (
-    upsert_document,
-    upsert_documents,
-    query_documents,
-    delete_document,
-    collection,
-)
-from .config import (
-    API_TOKEN,
-    ALLOWED_CORS_ORIGINS,
-    RATE_LIMIT_PER_MIN,
-    MONGO_URI,
-    MONGO_DB,
-    MAX_DOC_CHARS,
-)
+from .api_models import IngestPayload, SearchRequest, DeletePayload
+from .vector_store import upsert_document, query_documents, delete_document
 
 app = FastAPI(
     title="Mongo → Chroma Vector API",
@@ -40,195 +9,19 @@ app = FastAPI(
     description="Core vector service for syncing MongoDB documents into ChromaDB.",
 )
 
-STATIC_DIR = Path(__file__).resolve().parents[1] / "frontend"
-if STATIC_DIR.exists():
-    app.mount("/ui", StaticFiles(directory=STATIC_DIR, html=True), name="ui")
-
-# CORS allowlist (empty list → no CORS)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=ALLOWED_CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Very small in-memory rate limiter per client IP
-RATE_WINDOW_SEC = 60
-request_log: Dict[str, Deque[float]] = defaultdict(deque)
-
-# Metrics
-REQUEST_COUNT = Counter(
-    "api_requests_total", "Total API requests", ["path", "method", "status"]
-)
-REQUEST_LATENCY = Histogram(
-    "api_request_latency_seconds", "API request latency seconds", ["path", "method"]
-)
-
-# Mongo client for health checks
-_mongo_client: Optional[MongoClient] = None
-
-
-def get_mongo_client() -> MongoClient:
-    global _mongo_client
-    if _mongo_client is None:
-        _mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=2000)
-    return _mongo_client
-
-
-def log_json(message: str, **kwargs):
-    record = {"msg": message, **kwargs}
-    print(json.dumps(record))
-
-
-@app.middleware("http")
-async def auth_and_rate_limit(request: Request, call_next):
-    client_ip = request.client.host if request.client else "unknown"
-    request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
-    path = request.url.path
-
-    start = time.time()
-
-    # Paths that should not require auth or rate limiting
-    open_paths = (
-        "/healthz",
-        "/readyz",
-        "/metrics",
-        "/favicon.ico",
-        "/",
-    )
-    skip_auth = (
-        path in open_paths
-        or path.startswith("/docs")
-        or path.startswith("/openapi")
-        or path.startswith("/ui")
-    )
-
-    try:
-        if not skip_auth:
-            # Rate limiting
-            now = time.time()
-            timestamps = request_log[client_ip]
-            while timestamps and now - timestamps[0] > RATE_WINDOW_SEC:
-                timestamps.popleft()
-            if len(timestamps) >= RATE_LIMIT_PER_MIN:
-                raise HTTPException(status_code=429, detail="Too many requests")
-            timestamps.append(now)
-
-            # Token auth (Bearer or raw token)
-            if API_TOKEN:
-                auth_header = request.headers.get("authorization", "")
-                token = auth_header.replace("Bearer ", "").strip() if auth_header else ""
-                if token != API_TOKEN:
-                    raise HTTPException(status_code=401, detail="Unauthorized")
-
-        response = await call_next(request)
-    except HTTPException as exc:
-        latency = time.time() - start
-        response = JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
-        response.headers["X-Request-ID"] = request_id
-        REQUEST_COUNT.labels(path=path, method=request.method, status=exc.status_code).inc()
-        REQUEST_LATENCY.labels(path=path, method=request.method).observe(latency)
-        log_json(
-            "request",
-            request_id=request_id,
-            path=path,
-            method=request.method,
-            status=exc.status_code,
-            latency_ms=round(latency * 1000, 2),
-            client_ip=client_ip,
-        )
-        return response
-
-    latency = time.time() - start
-    status = response.status_code
-    REQUEST_COUNT.labels(path=path, method=request.method, status=status).inc()
-    REQUEST_LATENCY.labels(path=path, method=request.method).observe(latency)
-
-    response.headers["X-Request-ID"] = request_id
-    log_json(
-        "request",
-        request_id=request_id,
-        path=path,
-        method=request.method,
-        status=status,
-        latency_ms=round(latency * 1000, 2),
-        client_ip=client_ip,
-    )
-    return response
-
 
 def build_text_from_payload(p: IngestPayload) -> str:
     tags_str = ", ".join(p.tags) if p.tags else ""
     return f"Title: {p.title}\nBody: {p.body}\nTags: {tags_str}".strip()
 
 
-def validate_payload_size(title: str, body: str):
-    total_len = len(title) + len(body)
-    if total_len > MAX_DOC_CHARS:
-        raise HTTPException(
-            status_code=413,
-            detail=f"Document too large ({total_len} chars). Max allowed: {MAX_DOC_CHARS}",
-        )
-
-
-@app.get("/healthz")
-async def healthz():
+@app.get("/health")
+async def health():
     return {"status": "ok"}
-
-
-@app.get("/favicon.ico")
-async def favicon():
-    # Serve a no-op favicon to avoid 404 noise in logs.
-    return Response(status_code=204)
-
-
-@app.get("/")
-async def root():
-    """
-    Landing endpoint to avoid 401 on bare / and point to docs/UI.
-    """
-    return {
-        "status": "ok",
-        "message": "Mongo → Chroma Vector API. See /docs for Swagger or /ui for the console.",
-    }
-
-
-@app.get("/readyz")
-async def readyz():
-    """
-    Checks connectivity to Mongo and Chroma.
-    """
-    mongo_ok = False
-    chroma_ok = False
-
-    try:
-        client = get_mongo_client()
-        client.admin.command("ping")
-        mongo_ok = True
-    except Exception as e:
-        log_json("readyz_mongo_fail", error=str(e))
-
-    try:
-        # count triggers a quick round-trip to Chroma
-        collection.count()
-        chroma_ok = True
-    except Exception as e:
-        log_json("readyz_chroma_fail", error=str(e))
-
-    status = 200 if (mongo_ok and chroma_ok) else 503
-    return Response(
-        content=json.dumps(
-            {"status": "ok" if status == 200 else "degraded", "mongo": mongo_ok, "chroma": chroma_ok}
-        ),
-        media_type="application/json",
-        status_code=status,
-    )
 
 
 @app.post("/ingest")
 async def ingest_document(payload: IngestPayload):
-    validate_payload_size(payload.title, payload.body)
     text = build_text_from_payload(payload)
 
     # Chroma metadata must be scalar-valued → convert list → string
@@ -284,31 +77,3 @@ async def search(req: SearchRequest):
 async def delete(req: DeletePayload):
     delete_document(req.mongo_id)
     return {"status": "deleted", "id": req.mongo_id}
-
-
-@app.get("/metrics")
-async def metrics():
-    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
-
-
-@app.post("/ingest-batch")
-async def ingest_batch(payload: BatchIngestPayload):
-    if not payload.items:
-        return {"status": "skipped", "ingested": 0}
-
-    ids: List[str] = []
-    docs: List[str] = []
-    metas: List[Dict[str, Any]] = []
-
-    for item in payload.items:
-        validate_payload_size(item.title, item.body)
-        ids.append(item.mongo_id)
-        docs.append(build_text_from_payload(item))
-        tags_value = ", ".join(item.tags) if item.tags else None
-        meta = {"source": "mongo", "title": item.title}
-        if tags_value is not None:
-            meta["tags"] = tags_value
-        metas.append(meta)
-
-    upsert_documents(ids, docs, metas)
-    return {"status": "ingested", "ingested": len(ids)}

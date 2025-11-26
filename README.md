@@ -137,7 +137,7 @@ Use the built-in console to send `/ingest`, `/search`, and `/delete` requests, s
 
 ## 🔒 Security (auth, CORS, rate limits, HTTPS)
 
-- **Auth token**: set `API_TOKEN` (Bearer) and include `Authorization: Bearer <token>` on all API calls.
+- **Auth token**: non-development environments will refuse to start unless `API_TOKEN` is set. Put per-environment tokens in `.env`, `.env.staging`, `.env.production`, etc., and include `Authorization: Bearer <token>` on all API calls (optional only in development).
 - **CORS**: set `CORS_ALLOW_ORIGINS` as a comma-separated list (e.g., `https://yourapp.com,https://admin.yourapp.com`).
 - **Rate limit**: configure `RATE_LIMIT_PER_MIN` (default 120/min per client IP).
 - **HTTPS**: run FastAPI behind a reverse proxy (e.g., nginx/Traefik) that terminates TLS and forwards to Uvicorn. Example nginx snippet:

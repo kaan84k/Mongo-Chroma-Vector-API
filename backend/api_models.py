@@ -11,10 +11,6 @@ class IngestPayload(BaseModel):
     embedding: Optional[List[float]] = None
 
 
-class BatchIngestPayload(BaseModel):
-    items: List[IngestPayload] = Field(..., max_items=200)
-
-
 class SearchRequest(BaseModel):
     query: str
     top_k: int = Field(5, ge=1, le=50)

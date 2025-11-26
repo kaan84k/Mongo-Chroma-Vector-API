@@ -11,7 +11,7 @@ load_dotenv(BASE_ENV_PATH)
 APP_ENV = os.getenv("APP_ENV", "development")
 ENV_SPECIFIC = ROOT_DIR / f".env.{APP_ENV}"
 if ENV_SPECIFIC.exists():
-    load_dotenv(ENV_SPECIFIC, override=True)
+load_dotenv(ENV_SPECIFIC, override=True)
 
 # Fail fast if required vars are missing to avoid accidental defaults in production.
 REQUIRED_VARS = [
@@ -27,6 +27,14 @@ if missing:
 
 # API security
 API_TOKEN = os.getenv("API_TOKEN")
+if APP_ENV != "development" and not API_TOKEN:
+    error_msg = (
+        f"API_TOKEN must be set when APP_ENV is '{APP_ENV}'. "
+        "Add it to your environment or .env files for non-development runs."
+    )
+    print(error_msg)
+    raise RuntimeError(error_msg)
+
 ALLOWED_CORS_ORIGINS = [
     origin.strip()
     for origin in os.getenv("CORS_ALLOW_ORIGINS", "").split(",")
